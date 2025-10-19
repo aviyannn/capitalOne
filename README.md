@@ -1,4 +1,4 @@
-# capitalOne
+# CapitalOne
 
 **A gamified savings and expense dashboard to help you fund your dream car—built with Next.js, Supabase, and the Nessie open banking API.**
 
