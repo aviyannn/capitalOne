@@ -1,67 +1,125 @@
+// src/components/LoginCard.tsx
 import { useState } from "react";
+import { createClientBrowser } from "@/lib/supabase";
 
 const quotes = [
   "The stars don’t rush — they rise with purpose.",
   "Set your sights higher than the sky; aim for the stars.",
-  "Even the smallest star shines in the darkness.",
   "Dream big enough to need the whole universe.",
   "Every goal you set is a new star in your galaxy.",
-  "Shape your future—one constellation at a time.",
 ];
 
 const LoginCard: React.FC = () => {
-  const [error, setError] = useState("");
+  const supabase = createClientBrowser();
+
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (loading) return; // avoid double submits
+    setError(null);
     setLoading(true);
-    setError("");
-    setTimeout(() => {
-      setLoading(false);
+
+    try {
+      if (mode === "signup") {
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) {
+          const msg = (error.message || "").toLowerCase();
+          if (msg.includes("rate limit")) {
+            setMode("signin");
+            setError("You’ve tried this a few times. Try signing in instead.");
+            return;
+          }
+          if (msg.includes("already registered")) {
+            setMode("signin");
+            setError("Account exists — try signing in.");
+            return;
+          }
+          throw error;
+        }
+        if (!data.session) {
+          setError("Check your email to confirm your account, then sign in.");
+          return;
+        }
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      }
       window.location.href = "/dashboard";
-    }, 1200);
-  };
+    } catch (err: any) {
+      setError(err.message || "Authentication error");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const todayQuote = quotes[new Date().getDate() % quotes.length];
 
   return (
-    <div className="absolute top-1/2 left-1/2 z-30" style={{transform: "translate(-50%, -54%)"}}>
-      <div className="min-w-[340px] max-w-lg rounded-3xl shadow-[0_16px_44px_0_rgba(13,30,43,0.6)] border-[2.5px] border-[#6db3ff3a] bg-[#06091bbd] text-center animate-fadeIn backdrop-blur-2xl px-10 py-12">
-        <div className="mx-auto mb-6 w-20 h-20 rounded-full bg-gradient-radial from-[#236cf5] to-[#20125d] shadow-lg border-4 border-[#74c5ff37] flex items-center justify-center"
-            style={{
-              backgroundImage:
-              "url('https://cdn-icons-png.flaticon.com/512/616/616430.png')",
-              backgroundSize: "80% 80%",
-              backgroundPosition: "center",
-              backgroundRepeat: "no-repeat"
-            }}
-        />
-        <h1 className="text-3xl font-bold text-[#DAF2FF] mb-1 tracking-wide">Enter Your Orbit</h1>
-        <p className="text-base text-[#b7d0fa] mb-5">Reach for the stars—your cosmic journey starts here.</p>
-        <form onSubmit={handleLogin} className="space-y-4">
-          <input type="email" required placeholder="Email"
-                 className="w-full rounded-xl px-4 py-3 text-lg text-[#E0F0FB] bg-[#1e325a32] focus:outline-blue-600 shadow"
-          />
-          <input type="password" required minLength={6} placeholder="Password"
-                 className="w-full rounded-xl px-4 py-3 text-lg text-[#E0F0FB] bg-[#1e325a32] focus:outline-blue-600 shadow"
-          />
-          <button type="submit"
-                  className="w-full py-3 text-base rounded-full font-semibold bg-gradient-to-r from-[#16aaff] to-[#5d3bdf] text-white shadow-lg border border-[#856cff44] animate-pulse transition disabled:opacity-60"
-                  disabled={loading}>
-            {loading ? '🚀 Launching...' : '🚀 Launch'}
-          </button>
-        </form>
-        {error && <div className="text-[#fabebe] mt-2">{error}</div>}
-        <div className="text-[#bee7ffec] mt-5 text-sm">
-          <a href="/signup" className="text-[#7ec6ff] hover:underline">Create New Orbit</a> •
-          <a href="/forgot" className="text-[#7ec6ff] hover:underline">Lost in Space?</a>
-        </div>
-        <div className="text-[#feebff] mt-6 text-base opacity-90">{todayQuote}</div>
+    <div className="mx-auto max-w-xs rounded-3xl shadow-2xl bg-gradient-to-br from-[#1a193b] to-[#121228] backdrop-blur-xl border border-blue-600/30 px-6 py-9 flex flex-col items-center z-20">
+      <div className="mb-6">
+        <span className="block w-16 h-16 mx-auto rounded-full bg-gradient-to-r from-blue-400 via-purple-400 to-pink-300 flex items-center justify-center text-3xl">
+          🪐
+        </span>
       </div>
+
+      <h1 className="text-2xl font-extrabold text-white mb-1">
+        {mode === "signup" ? "Create Your Orbit" : "Enter Your Orbit"}
+      </h1>
+      <p className="text-base text-blue-100 mb-5 text-center">
+        Reach for the stars—your cosmic journey starts here.
+      </p>
+
+      <form onSubmit={handleSubmit} className="w-full flex flex-col items-center space-y-4">
+        <input
+          type="email"
+          required
+          placeholder="Email"
+          className="max-w-xs w-full rounded-xl px-4 py-3 text-base text-white bg-blue-900/40 placeholder:text-blue-200 focus:ring-2 focus:ring-blue-400 border-none mx-auto"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <input
+          type="password"
+          required
+          minLength={6}
+          placeholder="Password"
+          className="max-w-xs w-full rounded-xl px-4 py-3 text-base text-white bg-blue-900/40 placeholder:text-blue-200 focus:ring-2 focus:ring-blue-400 border-none mx-auto"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+
+        {error && <div className="text-red-300 font-semibold -mt-2 text-center">{error}</div>}
+
+        <button
+          type="submit"
+          className="max-w-xs w-full py-3 rounded-full bg-gradient-to-r from-blue-400 to-purple-500 text-white font-bold shadow-lg hover:scale-105 transition mx-auto disabled:opacity-60"
+          disabled={loading}
+        >
+          {loading ? "🚀 Launching..." : mode === "signup" ? "Create Account" : "🚀 Launch"}
+        </button>
+      </form>
+
+      <div className="text-blue-200 text-sm mt-4 flex flex-row space-x-3">
+        <button
+          type="button"
+          className="text-blue-300 hover:underline"
+          onClick={() => setMode(mode === "signup" ? "signin" : "signup")}
+          disabled={loading}
+        >
+          {mode === "signup" ? "Have an account? Sign in" : "New here? Create New Orbit"}
+        </button>
+        <span>•</span>
+        <a className="text-blue-300 hover:underline" href="/forgot">Lost in Space?</a>
+      </div>
+
+      <div className="text-blue-100 mt-2 text-base opacity-90 text-center">{todayQuote}</div>
     </div>
   );
 };
 
 export default LoginCard;
-

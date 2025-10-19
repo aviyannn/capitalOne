@@ -1,58 +1,255 @@
-import React, { useState } from "react";
+import Head from "next/head";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { UserProfileForm } from "../components/UserProfileForm";
-import CarSelector from "../components/CarSelector";
-import { PaymentSimulator } from "../components/PaymentSimulator";
+import { createClientBrowser } from "@/lib/supabase";
+import NebulaOverlay from "@/components/NebulaOverlay";
+import CelestialCanvas from "@/components/CelestialCanvas";
+import CarSelector, { CarChoice } from "@/components/CarSelector";
+import { PaymentSimulator } from "@/components/PaymentSimulator";
 
+// Profile types
+type Lifestyle =
+  | "budget"
+  | "balanced"
+  | "premium"
+  | "eco"
+  | "family"
+  | "performance";
 
-const Onboarding: React.FC = () => {
-  const [profile, setProfile] = useState<any>(null);
-  const [selectedCar, setSelectedCar] = useState<any>(null);
-  const [showSimulator, setShowSimulator] = useState(false);
-
+export default function Onboarding() {
+  const supabase = createClientBrowser();
   const router = useRouter();
 
-  // Step 1: Collect profile info
-  if (!profile) {
-    return <UserProfileForm onComplete={setProfile} />;
+  // Gate: must be logged in
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session) router.replace("/login");
+    });
+  }, [router, supabase]);
+
+  const [step, setStep] = useState<"profile" | "car" | "sim">("profile");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // profile
+  const [displayName, setDisplayName] = useState("");
+  const [annualIncome, setAnnualIncome] = useState("");
+  const [creditScore, setCreditScore] = useState("700");
+  const [lifestyle, setLifestyle] = useState<Lifestyle | "">("");
+
+  // chosen car (from selector)
+  const [car, setCar] = useState<CarChoice | null>(null);
+
+  async function saveProfile(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    // Force required validation for displayName, annualIncome, creditScore, lifestyle
+    if (
+      !displayName.trim() ||
+      !annualIncome.trim() ||
+      !creditScore.trim() ||
+      !lifestyle
+    ) {
+      setError("Please fill out all fields.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const { error } = await supabase.from("profiles").upsert(
+        {
+          id: user.id,
+          display_name: displayName || null,
+          annual_income: annualIncome ? Number(annualIncome) : null,
+          credit_score: creditScore ? Number(creditScore) : null,
+          lifestyle: lifestyle as any,
+        },
+        { onConflict: "id" }
+      );
+      if (error) throw error;
+      setStep("car");
+    } catch (e: any) {
+      setError(e?.message || "Could not save your profile.");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  // Step 2: Let user pick a car
-  if (!selectedCar) {
-    return <CarSelector profile={profile} onSelect={setSelectedCar} />;
+  function handleCarSelected(choice: CarChoice) {
+    setCar(choice);
+    setStep("sim");
   }
 
-  // Step 3: Payment simulation
-  if (!showSimulator) {
-    return (
-      <PaymentSimulator
-        car={selectedCar}
-        profile={profile}
-        onFinish={() => setShowSimulator(true)}
-      />
-    );
+  // Finish onboarding after simulator
+  async function finishAndGo() {
+    if (!car) return;
+    setSaving(true);
+    setError(null);
+
+    try {
+      const { data: { user }, error: uErr } = await supabase.auth.getUser();
+      if (uErr) throw uErr;
+      if (!user) throw new Error("Not authenticated");
+
+      // 1) mark onboarded + save preferred model
+      const { error: upErr } = await supabase
+        .from("profiles")
+        .upsert(
+          {
+            id: user.id,
+            preferred_toyota_models: [car.model],
+            onboarded: true,
+          },
+          { onConflict: "id" }
+        );
+      if (upErr) throw upErr;
+
+      // 2) optional starter goal (wrap in try/catch so failures don’t block)
+      try {
+        await supabase
+          .from("goals")
+          .upsert(
+            {
+              user_id: user.id,
+              name: car.model,
+              car_id: car.model,          // adjust if your schema differs
+              target_amount: car.price ?? 0,
+              is_active: true,
+            },
+            { onConflict: "user_id" }     // only if you add a unique index
+          );
+      } catch {
+        /* ignore if goals not set up yet */
+      }
+
+      router.replace("/dashboard");
+    } catch (e: any) {
+      setError(e?.message || "Failed to complete onboarding.");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  // Step 4: Go to dashboard after simulation
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-black via-indigo-900 to-purple-900">
-      <div className="bg-black bg-opacity-60 rounded-2xl p-8 max-w-lg mx-auto shadow-xl mt-10 flex flex-col gap-3">
-        <h2 className="text-white font-bold text-xl mb-4">
-          You're ready!
-        </h2>
-        <div className="text-indigo-200 mb-2">
-          Profile and plan selected.<br />
-          <span className="font-semibold text-yellow-300">Proceed to your personalized dashboard and cosmic journey.</span>
-        </div>
-        <button
-          className="mt-6 rounded bg-gradient-to-r from-indigo-700 to-purple-500 text-white px-6 py-3 font-bold"
-          onClick={() => router.push("/dashboard")}
-        >
-          Continue to Dashboard
-        </button>
-      </div>
-    </div>
-  );
-};
+    <>
+      <Head><title>Onboarding | Car Cosmos</title></Head>
 
-export default Onboarding;
+      {/* cosmic background */}
+      <NebulaOverlay />
+      <CelestialCanvas />
+
+      {/* error toast */}
+      {error && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-40 bg-red-900/70 text-red-100 border border-red-400/40 px-4 py-2 rounded-lg">
+          {error}
+        </div>
+      )}
+
+      {/* STEP 1: Profile */}
+      {step === "profile" && (
+        <main className="relative z-10 min-h-screen flex items-center justify-center px-4">
+          <form
+            onSubmit={saveProfile}
+            className="w-full max-w-xl rounded-3xl bg-black/55 border border-blue-500/25 shadow-2xl px-8 py-10 backdrop-blur-xl"
+          >
+            <h1 className="text-3xl font-extrabold text-white mb-6 text-center">
+              Personalize Your Journey
+            </h1>
+
+            <div className="space-y-4">
+              <input
+                required
+                className="w-full rounded-xl px-4 py-3 bg-white/10 text-white placeholder:text-blue-200 focus:ring-2 focus:ring-blue-400 outline-none"
+                placeholder="Name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+              />
+              <input
+                required
+                className="w-full rounded-xl px-4 py-3 bg-white/10 text-white placeholder:text-blue-200 focus:ring-2 focus:ring-blue-400 outline-none"
+                placeholder="Annual Income"
+                inputMode="numeric"
+                value={annualIncome}
+                onChange={(e) => setAnnualIncome(e.target.value)}
+              />
+              <div>
+                <label className="block text-blue-200 text-sm mb-1">
+                  Credit Score <span className="opacity-70">(300–850)</span>
+                </label>
+                <input
+                  required
+                  className="w-full rounded-xl px-4 py-3 bg-white/10 text-white placeholder:text-blue-200 focus:ring-2 focus:ring-blue-400 outline-none"
+                  placeholder="700"
+                  inputMode="numeric"
+                  value={creditScore}
+                  onChange={(e) => setCreditScore(e.target.value)}
+                />
+              </div>
+              <select
+                required
+                className="w-full rounded-xl px-4 py-3 bg-white/10 text-white focus:ring-2 focus:ring-blue-400 outline-none"
+                value={lifestyle}
+                onChange={(e) => setLifestyle(e.target.value as Lifestyle)}
+              >
+                <option value="">Select Lifestyle</option>
+                <option value="budget">Budget</option>
+                <option value="balanced">Balanced</option>
+                <option value="premium">Premium</option>
+                <option value="eco">Eco</option>
+                <option value="family">Family</option>
+                <option value="performance">Performance</option>
+              </select>
+
+              <button
+                type="submit"
+                disabled={saving}
+                className="w-full mt-2 py-3 rounded-full bg-gradient-to-r from-blue-400 to-purple-500 text-white font-bold shadow-lg disabled:opacity-60"
+              >
+                {saving ? "Saving…" : "Next: Find Your Car"}
+              </button>
+            </div>
+          </form>
+        </main>
+      )}
+
+      {/* STEP 2: Car selection */}
+      {step === "car" && (
+        <main className="relative z-10 min-h-screen flex flex-col items-center justify-center px-6">
+          <h2 className="text-white text-3xl font-extrabold mb-6 drop-shadow">
+            Choose your Toyota target
+          </h2>
+          <div className="w-full max-w-5xl">
+            <CarSelector onSelect={handleCarSelected} />
+          </div>
+        </main>
+      )}
+
+      {/* STEP 3: Simulator then finish */}
+      {step === "sim" && car && (
+        <main className="relative z-10 min-h-screen flex items-center justify-center px-6">
+          <PaymentSimulator
+  car={{
+    name: car.model,
+    price: car.price ?? 0,
+    monthly: 0,
+    description: `${car.model} plan`,
+  }}
+  profile={{
+    income: Number(annualIncome || "0"),
+    creditScore: Number(creditScore || "700"),
+    lifestyle,
+    // ssn: ???   <--- ssn is missing!
+  }}
+  onFinish={finishAndGo}
+/>
+        </main>
+      )}
+    </>
+  );
+}
