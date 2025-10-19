@@ -11,6 +11,7 @@
     "@react-three/drei": "^10.7.6",
     "@supabase/ssr": "^0.7.0",
     "@types/three": "^0.180.0",
+    "axios": "^1.12.2",
     "chart.js": "^4.5.1",
     "cookie": "^1.0.2",
     "next": "15.5.6",
