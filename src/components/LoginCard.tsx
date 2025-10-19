@@ -102,6 +102,15 @@ const LoginCard: React.FC = () => {
         >
           {loading ? "🚀 Launching..." : mode === "signup" ? "Create Account" : "🚀 Launch"}
         </button>
+
+        {/* Bypass (Dev-only) Button */}
+        <button
+          type="button"
+          onClick={() => { window.location.href = "/onboarding"; }}
+          className="mt-1 w-full rounded-full bg-gradient-to-r from-gray-500 to-gray-700 text-white py-2 text-sm font-bold hover:scale-105 transition"
+        >
+          🚀 Bypass (Dev-only)
+        </button>
       </form>
 
       <div className="text-blue-200 text-sm mt-4 flex flex-row space-x-3">

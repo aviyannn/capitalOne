@@ -12,14 +12,16 @@ import { useUserProgress } from "../hooks/useUserProgress";
 import SpendingOverview from "@/components/SpendingOverview";
 import AffordabilityCard from "@/components/AffordabilityCard";
 import ProjectionCard from "@/components/ProjectionCard";
+import { Pie } from "react-chartjs-2";
+import Chart from "chart.js/auto";
+import toast from "react-hot-toast";
 
-// Types
 type SummaryTask = { id: string; title: string; is_done: boolean };
 type SummaryProgress = {
   goal_id: string;
   target_amount: number;
   total_saved: number;
-  pct_complete: number; // 0..100
+  pct_complete: number;
   remaining: number;
   goal_name?: string;
 };
@@ -28,10 +30,7 @@ type SummaryResponse = {
   tasks: SummaryTask[];
   streak: number;
 };
-
 type Transaction = { amount: number; date: string; description: string };
-
-// New finance types
 type FinanceData = {
   income: { annual: number; monthly: number; safeCarBudget: number };
   spendByCat: Record<string, number>;
@@ -40,7 +39,6 @@ type FinanceData = {
 };
 
 const Dashboard: React.FC = () => {
-  // Supabase session check
   useEffect(() => {
     const supabase = createClientBrowser();
     supabase.auth.getSession().then(({ data }) => {
@@ -48,7 +46,6 @@ const Dashboard: React.FC = () => {
     });
   }, []);
 
-  // Dashboard summary data
   const [summary, setSummary] = useState<SummaryResponse>({
     progress: null,
     tasks: [],
@@ -56,17 +53,29 @@ const Dashboard: React.FC = () => {
   });
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-
-  // If useUserProgress relies on these, keep them
   const [accountData] = useState<any[]>([]);
   const [transactions] = useState<Transaction[]>([]);
   const mainAccount = accountData.length > 0 ? accountData[0] : null;
-
   const goalProgress = summary.progress?.pct_complete ?? 0;
   const { streak: computedStreak, milestones } = useUserProgress(
     mainAccount,
     transactions
   );
+  const [finance, setFinance] = useState<FinanceData | null>(null);
+
+  // Reminders state!
+  const [reminders, setReminders] = useState<string[]>([]);
+  const [reminderInput, setReminderInput] = useState("");
+
+  // Add/Show reminders
+  function handleAddReminder(e: React.FormEvent) {
+    e.preventDefault();
+    if (reminderInput.trim().length === 0) return;
+    setReminders([...reminders, reminderInput]);
+    setReminderInput("");
+    toast.success("Reminder set!");
+    // Persist to backend if needed
+  }
 
   const loadSummary = useCallback(async () => {
     try {
@@ -82,12 +91,8 @@ const Dashboard: React.FC = () => {
       setLoading(false);
     }
   }, []);
+  useEffect(() => { loadSummary(); }, [loadSummary]);
 
-  useEffect(() => {
-    loadSummary();
-  }, [loadSummary]);
-
-  // Toggle a daily goal (optimistic)
   async function handleComplete(taskId: string) {
     setSummary((prev) => ({
       ...prev,
@@ -103,7 +108,6 @@ const Dashboard: React.FC = () => {
     });
 
     if (!res.ok) {
-      // revert on error
       setSummary((prev) => ({
         ...prev,
         tasks: prev.tasks.map((t) =>
@@ -112,15 +116,11 @@ const Dashboard: React.FC = () => {
       }));
       return;
     }
-
     const j = await res.json().catch(() => null);
     if (j?.streak !== undefined) {
       setSummary((prev) => ({ ...prev, streak: j.streak }));
     }
   }
-
-  // -- Finance Features --
-  const [finance, setFinance] = useState<FinanceData | null>(null);
 
   const loadFinance = useCallback(async () => {
     try {
@@ -129,7 +129,6 @@ const Dashboard: React.FC = () => {
       setFinance(await r.json());
     } catch (e) {}
   }, []);
-
   useEffect(() => { loadFinance(); }, [loadFinance]);
 
   async function handleAddTransaction(e: React.FormEvent<HTMLFormElement>) {
@@ -143,9 +142,16 @@ const Dashboard: React.FC = () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ amount: -Math.abs(amount), category, description }),
     });
-    loadFinance(); // refresh spend chart
+    loadFinance();
     (e.target as HTMLFormElement).reset();
   }
+
+  // Auto-alert on budget overdraw (example for financial alerts)
+  useEffect(() => {
+    if (finance?.budgetFlags?.some(b => b.pct > 100)) {
+      toast.error('Budget exceeded!');
+    }
+  }, [finance]);
 
   return (
     <Layout>
@@ -162,14 +168,14 @@ const Dashboard: React.FC = () => {
           percent={goalProgress}
         />
 
-<DailyGoals
-  goals={(summary.tasks ?? []).map((t) => ({
-    id: t.id,
-    description: t.title,
-    completed: t.is_done,
-  }))}
-  onComplete={handleComplete}
-/>
+        <DailyGoals
+          goals={(summary.tasks ?? []).map((t) => ({
+            id: t.id,
+            description: t.title,
+            completed: t.is_done,
+          }))}
+          onComplete={handleComplete}
+        />
 
         <StreakMilestone
           streak={summary.streak ?? computedStreak}
@@ -181,15 +187,42 @@ const Dashboard: React.FC = () => {
         {/* --- FINANCE CARDS START --- */}
         {finance && (
           <div className="mt-8 w-full flex flex-col items-center gap-6">
+
+            {/* Finance Cards */}
             <AffordabilityCard
               safeBudget={finance.income.safeCarBudget}
-              estPayment={undefined /* Fill from Payment Simulator if available */}
+              estPayment={undefined}
             />
+
+            {/* Chart example: Pie Chart for spending by category */}
+            <div className="max-w-lg w-full bg-black/50 rounded-2xl p-6">
+              <h3 className="text-lg font-bold text-blue-200 mb-2">Spending Breakdown</h3>
+              <Pie
+                data={{
+                  labels: Object.keys(finance.spendByCat),
+                  datasets: [
+                    {
+                      data: Object.values(finance.spendByCat),
+                      backgroundColor: [
+                        '#4F8CFF', '#6FFFBF', '#FFDD57', '#FF5A5A', '#F15BB5'
+                      ],
+                    },
+                  ],
+                }}
+                options={{
+                  plugins: { legend: { labels: { color: "#fff" } } },
+                }}
+              />
+            </div>
+
             <SpendingOverview spendByCat={finance.spendByCat} />
+
             <ProjectionCard
               targetAmount={Math.round((summary.progress?.target_amount ?? 3000) * 0.2)}
               currentSaved={summary.progress?.total_saved ?? 0}
             />
+
+            {/* Financial Alerts (budgetFlags) */}
             {finance.budgetFlags?.length > 0 && (
               <div className="w-full max-w-xl rounded-2xl bg-yellow-500/10 border border-yellow-400/30 p-4 text-yellow-100">
                 <div className="font-semibold mb-2">Heads up</div>
@@ -206,10 +239,27 @@ const Dashboard: React.FC = () => {
         )}
         {/* --- FINANCE CARDS END --- */}
 
+        {/* --- Reminders UI --- */}
+        <form
+          onSubmit={handleAddReminder}
+          className="w-full max-w-xl mt-6 mb-2 bg-blue-900/30 border border-blue-300/20 p-4 rounded-2xl text-sm text-blue-100"
+        >
+          <div className="font-semibold text-white mb-2">Set Reminder</div>
+          <div className="flex gap-2">
+            <input value={reminderInput} onChange={e => setReminderInput(e.target.value)} placeholder="Type reminder here..." className="bg-white/10 rounded px-3 py-2 text-white flex-1" required />
+            <button type="submit" className="bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded px-4 py-2 font-semibold">Add</button>
+          </div>
+        </form>
+        <ul className="w-full max-w-xl mb-2 text-blue-300">
+          {reminders.map((r, i) => (
+            <li key={i} className="mb-1">{r}</li>
+          ))}
+        </ul>
+
         {/* --- MINI ADD TRANSACTION FORM --- */}
         <form
           onSubmit={handleAddTransaction}
-          className="w-full max-w-xl mt-6 bg-black/60 border border-white/10 p-4 rounded-2xl text-sm text-blue-100"
+          className="w-full max-w-xl mt-4 bg-black/60 border border-white/10 p-4 rounded-2xl text-sm text-blue-100"
         >
           <div className="font-semibold text-white mb-2">Add an expense</div>
           <div className="grid grid-cols-3 gap-2">

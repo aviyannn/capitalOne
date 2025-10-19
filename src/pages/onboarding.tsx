@@ -16,12 +16,16 @@ type Lifestyle =
   | "family"
   | "performance";
 
+// Set BYPASS_LOGIN globally to true for this file (hardcoded for dev)
+const BYPASS_LOGIN = true;
+
 export default function Onboarding() {
   const supabase = createClientBrowser();
   const router = useRouter();
 
-  // Gate: must be logged in
+  // Gate: must be logged in (skip if bypass login is active)
   useEffect(() => {
+    if (BYPASS_LOGIN) return; // Login bypass always enabled
     supabase.auth.getSession().then(({ data }) => {
       if (!data.session) router.replace("/login");
     });
@@ -44,7 +48,7 @@ export default function Onboarding() {
     e.preventDefault();
     setError(null);
 
-    // Force required validation for displayName, annualIncome, creditScore, lifestyle
+    // Required field validation
     if (
       !displayName.trim() ||
       !annualIncome.trim() ||
@@ -57,22 +61,35 @@ export default function Onboarding() {
 
     setSaving(true);
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
+      // With BYPASS_LOGIN, use fake user object
+      let user;
+      if (BYPASS_LOGIN) {
+        user = { id: "dev-bypass-user-1" };
+      } else {
+        const {
+          data: { user: realUser },
+        } = await supabase.auth.getUser();
+        if (!realUser) throw new Error("Not authenticated");
+        user = realUser;
+      }
 
-      const { error } = await supabase.from("profiles").upsert(
-        {
-          id: user.id,
-          display_name: displayName || null,
-          annual_income: annualIncome ? Number(annualIncome) : null,
-          credit_score: creditScore ? Number(creditScore) : null,
-          lifestyle: lifestyle as any,
-        },
-        { onConflict: "id" }
-      );
-      if (error) throw error;
+      // Simulate save to DB with BYPASS_LOGIN, otherwise use Supabase
+      let upsertResult;
+      if (BYPASS_LOGIN) {
+        upsertResult = { error: null };
+      } else {
+        upsertResult = await supabase.from("profiles").upsert(
+          {
+            id: user.id,
+            display_name: displayName || null,
+            annual_income: annualIncome ? Number(annualIncome) : null,
+            credit_score: creditScore ? Number(creditScore) : null,
+            lifestyle: lifestyle as any,
+          },
+          { onConflict: "id" }
+        );
+      }
+      if (upsertResult.error) throw upsertResult.error;
       setStep("car");
     } catch (e: any) {
       setError(e?.message || "Could not save your profile.");
@@ -86,46 +103,58 @@ export default function Onboarding() {
     setStep("sim");
   }
 
-  // Finish onboarding after simulator
   async function finishAndGo() {
     if (!car) return;
     setSaving(true);
     setError(null);
 
     try {
-      const { data: { user }, error: uErr } = await supabase.auth.getUser();
-      if (uErr) throw uErr;
-      if (!user) throw new Error("Not authenticated");
+      let user;
+      if (BYPASS_LOGIN) {
+        user = { id: "dev-bypass-user-1" };
+      } else {
+        const { data: { user: realUser }, error: uErr } = await supabase.auth.getUser();
+        if (uErr) throw uErr;
+        if (!realUser) throw new Error("Not authenticated");
+        user = realUser;
+      }
 
-      // 1) mark onboarded + save preferred model
-      const { error: upErr } = await supabase
-        .from("profiles")
-        .upsert(
-          {
-            id: user.id,
-            preferred_toyota_models: [car.model],
-            onboarded: true,
-          },
-          { onConflict: "id" }
-        );
-      if (upErr) throw upErr;
-
-      // 2) optional starter goal (wrap in try/catch so failures don’t block)
-      try {
-        await supabase
-          .from("goals")
+      // Mark onboarded + save preferred model
+      let upsertProfileResult;
+      if (BYPASS_LOGIN) {
+        upsertProfileResult = { error: null };
+      } else {
+        upsertProfileResult = await supabase
+          .from("profiles")
           .upsert(
             {
-              user_id: user.id,
-              name: car.model,
-              car_id: car.model,          // adjust if your schema differs
-              target_amount: car.price ?? 0,
-              is_active: true,
+              id: user.id,
+              preferred_toyota_models: [car.model],
+              onboarded: true,
             },
-            { onConflict: "user_id" }     // only if you add a unique index
+            { onConflict: "id" }
           );
-      } catch {
-        /* ignore if goals not set up yet */
+      }
+      if (upsertProfileResult.error) throw upsertProfileResult.error;
+
+      // Optional starter goal (DB only if not bypass)
+      if (!BYPASS_LOGIN) {
+        try {
+          await supabase
+            .from("goals")
+            .upsert(
+              {
+                user_id: user.id,
+                name: car.model,
+                car_id: car.model,
+                target_amount: car.price ?? 0,
+                is_active: true,
+              },
+              { onConflict: "user_id" }
+            );
+        } catch {
+          /* ignore if goals not set up yet */
+        }
       }
 
       router.replace("/dashboard");
@@ -139,12 +168,9 @@ export default function Onboarding() {
   return (
     <>
       <Head><title>Onboarding | Car Cosmos</title></Head>
-
-      {/* cosmic background */}
       <NebulaOverlay />
       <CelestialCanvas />
 
-      {/* error toast */}
       {error && (
         <div className="fixed top-5 left-1/2 -translate-x-1/2 z-40 bg-red-900/70 text-red-100 border border-red-400/40 px-4 py-2 rounded-lg">
           {error}
@@ -161,7 +187,6 @@ export default function Onboarding() {
             <h1 className="text-3xl font-extrabold text-white mb-6 text-center">
               Personalize Your Journey
             </h1>
-
             <div className="space-y-4">
               <input
                 required
@@ -197,7 +222,7 @@ export default function Onboarding() {
                 value={lifestyle}
                 onChange={(e) => setLifestyle(e.target.value as Lifestyle)}
               >
-                <option value="">Select Lifestyle</option>
+                <option value="">Select Goal</option>
                 <option value="budget">Budget</option>
                 <option value="balanced">Balanced</option>
                 <option value="premium">Premium</option>
@@ -205,7 +230,6 @@ export default function Onboarding() {
                 <option value="family">Family</option>
                 <option value="performance">Performance</option>
               </select>
-
               <button
                 type="submit"
                 disabled={saving}
@@ -214,6 +238,13 @@ export default function Onboarding() {
                 {saving ? "Saving…" : "Next: Find Your Car"}
               </button>
             </div>
+            {/* BYPASS Message */}
+            {BYPASS_LOGIN && (
+              <div className="mt-4 p-3 text-center rounded-xl bg-gray-700 text-white font-medium border border-gray-500">
+                🚀 <b>Login bypass is <span className="text-green-300">ENABLED</span> for dev-demo.<br />
+                All authentication is skipped.</b>
+              </div>
+            )}
           </form>
         </main>
       )}
@@ -234,20 +265,19 @@ export default function Onboarding() {
       {step === "sim" && car && (
         <main className="relative z-10 min-h-screen flex items-center justify-center px-6">
           <PaymentSimulator
-  car={{
-    name: car.model,
-    price: car.price ?? 0,
-    monthly: 0,
-    description: `${car.model} plan`,
-  }}
-  profile={{
-    income: Number(annualIncome || "0"),
-    creditScore: Number(creditScore || "700"),
-    lifestyle,
-    // ssn: ???   <--- ssn is missing!
-  }}
-  onFinish={finishAndGo}
-/>
+            car={{
+              name: car.model,
+              price: car.price ?? 0,
+              monthly: 0,
+              description: `${car.model} plan`,
+            }}
+            profile={{
+              income: Number(annualIncome || "0"),
+              creditScore: Number(creditScore || "700"),
+              lifestyle,
+            }}
+            onFinish={finishAndGo}
+          />
         </main>
       )}
     </>

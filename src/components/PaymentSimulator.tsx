@@ -22,14 +22,14 @@ export const PaymentSimulator: React.FC<PaymentSimulatorProps> = ({
   profile,
   onFinish,
 }) => {
-  // Use provided creditScore; fallback if missing
+  // Use the given credit score, default to 700 if missing
   const creditScore = profile.creditScore || 700;
 
-  // Simple APR logic based on creditScore
+  // Simulate APR based on creditScore
   const aprSim =
     creditScore >= 750 ? 2.9 : creditScore >= 700 ? 3.9 : 5.9;
 
-  // Calculate monthly payment (basic version)
+  // Calculate monthly payment (simple formula)
   const months = 60;
   const principal = car.price;
   const aprDecimal = aprSim / 100 / 12;
